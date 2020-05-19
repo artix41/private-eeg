@@ -34,9 +34,6 @@ class DataLoader:
         self.X_test_ptr_client = []
         self.Y_test_ptr_client = []
 
-        self.n_samples_train_per_client = -1
-        self.n_samples_test_per_client = -1
-
         self.load_data_method = {"mnist_iid": self.load_mnist_iid,
                                  "sleep": self.load_sleep_data}
 
@@ -79,12 +76,9 @@ class DataLoader:
             mnist_test.targets[n_samples_test_per_client * i:n_samples_test_per_client * (i + 1)].send(self.clients[i])
             for i in range(self.n_clients)]
 
-        self.n_samples_train_per_client = n_samples_train_per_client
-        self.n_samples_test_per_client = n_samples_test_per_client
-
     def load_sleep_data(self):
-        self.n_samples_train_per_client = 10
-        self.n_samples_test_per_client = 10
+        max_samples = 1000
+        proportion_train = 0.75
 
         data_folder = "../data/SleepEDF/"
 
@@ -136,19 +130,26 @@ class DataLoader:
         Y_test_client = [[] for _ in range(self.n_clients)]
 
         for subject in range(self.n_clients):
-            for i_image in range(self.n_samples_train_per_client + self.n_samples_test_per_client):
+            n_samples = min(max_samples, len(list_labels_for_subject[subject]))
+            n_samples_train = int(proportion_train * n_samples)
+            for i_image in range(n_samples):
                 image = plt.imread(list_imfiles_for_subject[subject][i_image])
                 if not (image.shape[0] == 224 and image.shape[1] == 224):
                     image = skimage.transform.resize(image, (224, 224), preserve_range=True)
                 image = image.reshape(3, 224, 224)
 
-                if i_image < self.n_samples_train_per_client:
+                if i_image < n_samples_train:
                     X_train_client[subject].append(image)
                     Y_train_client[subject].append(list_labels_for_subject[subject][i_image])
                 else:
                     X_test_client[subject].append(image)
                     Y_test_client[subject].append(list_labels_for_subject[subject][i_image])
 
+        print("Convert to tensors...")
+        X_train_client = torch.tensor(np.array(X_train_client))
+        X_test_client = torch.tensor(np.array(X_test_client))
+        Y_train_client = torch.tensor(np.array(Y_train_client), dtype=torch.long)
+        Y_test_client = torch.tensor(np.array(Y_test_client), dtype=torch.long)
 
         # print("Transform dataset to tensors...")
         # X_train_client = torch.Tensor(X_train_client)
@@ -159,9 +160,9 @@ class DataLoader:
         # =========== Send dataset to clients ===========
 
         print("Send to clients...")
-        self.X_train_ptr_client = [torch.Tensor(X_train_client[i]).send(self.clients[i]) for i in range(self.n_clients)]
-        self.Y_train_ptr_client = [torch.Tensor(Y_train_client[i]).send(self.clients[i]) for i in range(self.n_clients)]
-        self.X_test_ptr_client = [torch.Tensor(X_test_client[i]).send(self.clients[i]) for i in range(self.n_clients)]
-        self.Y_test_ptr_client = [torch.Tensor(Y_test_client[i]).send(self.clients[i]) for i in range(self.n_clients)]
+        self.X_train_ptr_client = [X_train_client[i].send(self.clients[i]) for i in range(self.n_clients)]
+        self.Y_train_ptr_client = [Y_train_client[i].send(self.clients[i]) for i in range(self.n_clients)]
+        self.X_test_ptr_client = [X_test_client[i].send(self.clients[i]) for i in range(self.n_clients)]
+        self.Y_test_ptr_client = [Y_test_client[i].send(self.clients[i]) for i in range(self.n_clients)]
 
 
