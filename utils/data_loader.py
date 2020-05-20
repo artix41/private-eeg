@@ -6,6 +6,7 @@ import glob
 import numpy as np
 import matplotlib.pyplot as plt
 import skimage.transform
+import math
 
 
 def get_mnist():
@@ -23,10 +24,11 @@ def transform_mnist(X_mnist):
 
 
 class DataLoader:
-    def __init__(self, name, clients):
+    def __init__(self, name, clients, max_samples_per_client=math.inf):
         self.name = name
         self.clients = clients
         self.n_clients = len(clients)
+        self.max_samples_per_client = max_samples_per_client
 
         # List of pointers to each client's X_train
         self.X_train_ptr_client = []
@@ -54,9 +56,12 @@ class DataLoader:
 
     def load_mnist_iid(self):
         mnist_train, mnist_test = get_mnist()
+        proportion_train = len(mnist_train.targets) / (len(mnist_train.targets) + len(mnist_test.targets))
 
-        n_samples_train_per_client = len(mnist_train.targets) // self.n_clients
-        n_samples_test_per_client = len(mnist_test.targets) // self.n_clients
+        n_samples_train_per_client = min(self.max_samples_per_client * proportion_train,
+                                         len(mnist_train.targets) // self.n_clients)
+        n_samples_test_per_client = min(self.max_samples_per_client * (1-proportion_train),
+                                        len(mnist_test.targets) // self.n_clients)
 
         self.X_train_ptr_client = [
             transform_mnist(
@@ -77,7 +82,6 @@ class DataLoader:
             for i in range(self.n_clients)]
 
     def load_sleep_data(self):
-        max_samples = 1000
         proportion_train = 0.75
 
         data_folder = "../data/SleepEDF/"
@@ -130,7 +134,7 @@ class DataLoader:
         Y_test_client = [[] for _ in range(self.n_clients)]
 
         for subject in range(self.n_clients):
-            n_samples = min(max_samples, len(list_labels_for_subject[subject]))
+            n_samples = min(self.max_samples_per_client, len(list_labels_for_subject[subject]))
             n_samples_train = int(proportion_train * n_samples)
             for i_image in range(n_samples):
                 image = plt.imread(list_imfiles_for_subject[subject][i_image])

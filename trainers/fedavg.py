@@ -124,10 +124,10 @@ class FedAvg:
                 # cur_train_loss_client = self.test(smpc=smpc, on_training=True)
                 # self.list_train_loss_client = np.hstack([self.list_train_loss_client, cur_train_loss_client])
 
-            if i_round != 0 and i_round % save_every == 0:
+            if i_round != 0 and i_round % save_every == 0 or i_round == n_rounds - 1:
                 self.save()
 
-    def test(self, on_training=False, smpc=False, test_batch_size=100):
+    def test(self, on_training=False, smpc=False, test_batch_size=50):
         test_loss_client, accuracy_client = [], []
         for i_client in range(self.n_clients):
             if on_training:
