@@ -16,7 +16,7 @@ np.random.seed(42)
 
 def main():
     # ====================== Parameters ======================
-    name_subtask = ""
+    name_subtask = "pretraining"
 
     test_every = 1
     save_every = 5
@@ -29,6 +29,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--data", help="Name of the dataset",
                         type=str, default="sleep", choices=["sleep", "mnist"])
+    parser.add_argument("-a", "--algo", help="Federated algorithm",
+                        type=str, default="fedavg", choices=["fedavg", "scaffold"])
     parser.add_argument("-c", "--clients", help="Number of clients",
                         type=int, default=2)
     parser.add_argument("-s", "--samples", help="Number of samples per clients",
@@ -47,6 +49,8 @@ def main():
     args = parser.parse_args()
 
     problem_name = args.data
+    algo = args.algo
+    scaffold = True if algo == "scaffold" else False
     n_rounds = args.rounds
     n_local_epochs = args.epochs
 
@@ -57,7 +61,7 @@ def main():
     lr = args.lr
     batch_size = args.b
 
-    subtask_folder = os.path.join(output_folder, f"{n_clients}-clients", name_subtask)
+    subtask_folder = os.path.join(output_folder, f"{n_clients}-clients", f"{n_local_epochs}-epochs", algo, name_subtask)
 
     # ================== Create clients ======================
 
@@ -80,7 +84,8 @@ def main():
 
     save_folder = os.path.join(subtask_folder, "model")
     trainer = FedAvg(model, data_loader, crypto_provider, save_folder)
-    trainer.train(n_rounds, n_local_epochs, n_clients_round, lr, batch_size, test_every, save_every, smpc=smpc)
+    trainer.train(n_rounds, n_local_epochs, n_clients_round, lr, batch_size, test_every, save_every,
+                  scaffold=scaffold, smpc=smpc)
 
     #  =================== Plot results ======================
 

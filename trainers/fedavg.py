@@ -29,28 +29,45 @@ class FedAvg:
         self.list_train_loss_client = [[]] * self.n_clients
         self.list_test_rounds = []
 
-    def train(self, n_rounds, n_local_epochs, n_clients_round, lr=0.1, batch_size=16, test_every=1, save_every=2, smpc=False):
-        # opt_client = [optim.Adam(params=self.model.model_client[i].parameters(), lr=lr) for i in range(self.n_clients)]
+    def train(self, n_rounds, n_local_epochs, n_clients_round, lr=0.1, batch_size=16, test_every=1, save_every=2,
+              smpc=False, scaffold=True):
+        torch.set_printoptions(threshold=10)
         opt_client = [Optims([self.clients[i].id], optim=optim.Adam(params=self.model.model_client[i].parameters(), lr=lr))
                       for i in range(self.n_clients)]
         self.list_accuracy_client = [[]] * self.n_clients
         self.list_train_loss_client = [[]] * self.n_clients
         self.list_test_rounds = []
 
+        if scaffold:
+            control_variate_server = [torch.zeros(p.size()) for p in self.model.model_client[0].parameters()]
+            control_variate_client = [[cv.send(c) for c in self.clients] for cv in control_variate_server]
+
         for i_round in range(n_rounds):
             print(f"================== Round {i_round} ==================")
             list_clients_round = np.random.choice(range(self.n_clients), n_clients_round, replace=False)
 
+            if scaffold:
+                delta_c_server = [torch.zeros(p.size()) for p in self.model.model_client[0].parameters()]
+                # if i_round >= 1:
+                #     control_variate_client = [[cv[i].send(c) for i, c in enumerate(self.clients)] for cv in control_variate_client]
+
             train_loss_client = []
+
             for i_client, client_index in enumerate(list_clients_round):
                 print(f"\nClient {i_client + 1}/{n_clients_round}")
                 loss_client = 0
                 i_iter = 0
+                c_plus = []
                 model_client = self.model.get_model_client(client_index)
                 X_train_ptr, Y_train_ptr = self.data_loader.get_training_data(client_index)
                 n_samples_train = len(X_train_ptr)
                 sample_indices = list(np.random.permutation(range(n_samples_train)))
 
+                opt = opt_client[client_index].get_optim(self.clients[client_index].id)
+                if scaffold:
+                    delta_c_server = [cv.send(self.clients[client_index]) for cv in delta_c_server]
+                    control_variate_server = [cv.send(self.clients[client_index]) for cv in control_variate_server]
+                # print("CV Server", control_variate_server)
                 # Update client
                 for i_local_epoch in range(n_local_epochs):  # n_local_epochs=E
                     list_batch_indices = batch_list(sample_indices, batch_size)
@@ -63,10 +80,17 @@ class FedAvg:
 
                         pred = model_client(X_ptr)
                         loss = self.loss_fn(pred, Y_ptr)
-
-                        opt = opt_client[client_index].get_optim(self.clients[client_index].id)
+                        for param in model_client.parameters():
+                            param.grad = param.grad.send(self.clients[client_index])
                         opt.zero_grad()
                         loss.backward()
+
+                        if scaffold:
+                            for i_param, param in enumerate(model_client.parameters()):
+                                if i_local_epoch == 0 and i_batch == 0:
+                                    c_plus.append(param.grad.copy().get().send(self.clients[client_index]))
+                                param.grad += control_variate_server[i_param] - control_variate_client[i_param][client_index]
+
                         opt.step()
 
                         loss_client += loss.get().data.numpy()
@@ -80,11 +104,27 @@ class FedAvg:
 
                         del batch_indices_tensor
 
+                if scaffold:
+                    # Update the control variates on the client and the update for the server
+                    for i_param, param in enumerate(model_client.parameters()):
+                        delta_c_server[i_param] += (c_plus[i_param] - control_variate_client[i_param][client_index].copy()) / self.n_clients
+                        control_variate_client[i_param][client_index] = c_plus[i_param]
+                        control_variate_server[i_param] = control_variate_server[i_param].get()
+                        delta_c_server[i_param] = delta_c_server[i_param].get()
+
+                        # control_variate_client[i_param][client_index] = control_variate_client[i_param][client_index].send(self.clients[client_index])
+
                 train_loss_client.append([loss_client / i_iter])
+                # control_variate_server = [cv.send(self.clients[client_index]) for cv in control_variate_server]
+
                 print("")
 
             print()
             self.list_train_loss_client = np.hstack([self.list_train_loss_client, train_loss_client])
+
+            if scaffold:
+                for i_param in range(len(control_variate_server)):
+                    control_variate_server[i_param] += delta_c_server[i_param]
 
             # Update models
             with torch.no_grad():
